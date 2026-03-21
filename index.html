@@ -738,6 +738,8 @@ const DEPOSIT_DISTANCE = 2.0;
 const CARROT_LOSS_ON_CATCH = 2;
 const CATCH_COOLDOWN = 2000; // ms
 const FOX_ACCEL = 0.0001; // fox gets faster over time
+const BURROW_SAFE_RADIUS = 6; // rabbit safe zone around burrow
+const FOX_WANDER_SPEED = 0.015; // fox speed when wandering (relaxed)
 
 // Road & Traffic Config
 const ROAD_WIDTH = 3;
@@ -1735,6 +1737,10 @@ let carrotsHeld = 0;
 let totalScore = 0;
 let lastCatchTime = 0;
 let foxSpeedBonus = 0;
+let foxState = 'chasing'; // 'chasing' or 'wandering'
+let foxWanderDir = new THREE.Vector3(1, 0, 0);
+let foxWanderTimer = 0;
+let foxChaseBlend = 1; // 1 = full chase, 0 = full wander (for smooth transitions)
 let gameTime = 0;
 let trafficTimer = 0;
 let pedestrianGreen = true;
@@ -2218,13 +2224,17 @@ function animateRabbit(dt, moving) {
 }
 
 let foxAnimPhase = 0;
-function animateFox(dt) {
-  foxAnimPhase += dt * 8;
+function animateFox(dt, chaseBlend = 1) {
+  // Slower animation when relaxed (wandering near burrow)
+  const animSpeed = THREE.MathUtils.lerp(4, 8, chaseBlend);
+  const hopHeight = THREE.MathUtils.lerp(0.04, 0.1, chaseBlend);
+  const wagAmount = THREE.MathUtils.lerp(0.5, 0.3, chaseBlend); // more tail wag when relaxed
+  foxAnimPhase += dt * animSpeed;
   const groundY = getTerrainHeight(fox.position.x, fox.position.z);
-  fox.position.y = groundY + Math.abs(Math.sin(foxAnimPhase)) * 0.1;
-  // Tail wag
+  fox.position.y = groundY + Math.abs(Math.sin(foxAnimPhase)) * hopHeight;
+  // Tail wag (more relaxed/wider when wandering)
   if (fox.userData.tailGroup) {
-    fox.userData.tailGroup.rotation.y = Math.sin(foxAnimPhase * 1.5) * 0.3;
+    fox.userData.tailGroup.rotation.y = Math.sin(foxAnimPhase * 1.5) * wagAmount;
   }
 }
 
@@ -2387,26 +2397,98 @@ function update() {
   if (moving) SoundEngine.playHop();
 
   // --- Fox AI ---
-  foxSpeedBonus += FOX_ACCEL * dt;
+  // Only accelerate when chasing (don't accumulate speed while wandering)
+  if (foxState === 'chasing') foxSpeedBonus += FOX_ACCEL * dt;
   const foxSpeed = FOX_SPEED + foxSpeedBonus;
   const toRabbit = new THREE.Vector3().subVectors(rabbit.position, fox.position);
   toRabbit.y = 0;
   const dist = toRabbit.length();
 
-  if (dist > 0.1) {
-    toRabbit.normalize();
-    fox.position.x += toRabbit.x * foxSpeed;
-    fox.position.z += toRabbit.z * foxSpeed;
+  // Check if rabbit is in burrow safe zone
+  const rabbitNearBurrow = burrow
+    ? rabbit.position.distanceTo(burrow.position) < BURROW_SAFE_RADIUS
+    : false;
 
-    // Fox faces rabbit
-    const foxAngle = Math.atan2(toRabbit.x, toRabbit.z);
+  // State transitions
+  if (rabbitNearBurrow && foxState === 'chasing') {
+    foxState = 'wandering';
+    // Pick initial wander direction: away from burrow
+    const awayFromBurrow = new THREE.Vector3().subVectors(fox.position, burrow.position);
+    awayFromBurrow.y = 0;
+    if (awayFromBurrow.length() > 0.1) {
+      awayFromBurrow.normalize();
+    } else {
+      awayFromBurrow.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    }
+    // Add some randomness to the direction
+    awayFromBurrow.x += (Math.random() - 0.5) * 0.6;
+    awayFromBurrow.z += (Math.random() - 0.5) * 0.6;
+    awayFromBurrow.normalize();
+    foxWanderDir.copy(awayFromBurrow);
+    foxWanderTimer = 2 + Math.random() * 2;
+  } else if (!rabbitNearBurrow && foxState === 'wandering') {
+    foxState = 'chasing';
+  }
+
+  // Smooth blend between states
+  const blendTarget = foxState === 'chasing' ? 1 : 0;
+  foxChaseBlend = THREE.MathUtils.lerp(foxChaseBlend, blendTarget, 0.03);
+
+  if (foxState === 'wandering') {
+    // Wander: move away from burrow, change direction periodically
+    foxWanderTimer -= dt;
+    if (foxWanderTimer <= 0) {
+      // Pick a new wander direction, biased away from burrow
+      const awayFromBurrow = new THREE.Vector3().subVectors(fox.position, burrow.position);
+      awayFromBurrow.y = 0;
+      if (awayFromBurrow.length() > 0.1) awayFromBurrow.normalize();
+      else awayFromBurrow.set(1, 0, 0);
+      // Random offset
+      awayFromBurrow.x += (Math.random() - 0.5) * 1.0;
+      awayFromBurrow.z += (Math.random() - 0.5) * 1.0;
+      awayFromBurrow.normalize();
+      foxWanderDir.copy(awayFromBurrow);
+      foxWanderTimer = 2 + Math.random() * 3;
+    }
+
+    // Blend between chase and wander movement
+    const wanderSpeed = FOX_WANDER_SPEED;
+    const blendedDirX = foxChaseBlend * toRabbit.x * foxSpeed + (1 - foxChaseBlend) * foxWanderDir.x * wanderSpeed;
+    const blendedDirZ = foxChaseBlend * toRabbit.z * foxSpeed + (1 - foxChaseBlend) * foxWanderDir.z * wanderSpeed;
+
+    fox.position.x += blendedDirX;
+    fox.position.z += blendedDirZ;
+
+    // Face movement direction
+    const foxAngle = Math.atan2(blendedDirX, blendedDirZ);
+    fox.rotation.y = THREE.MathUtils.lerp(fox.rotation.y, foxAngle, 0.05);
+
+    // Keep fox within field bounds
+    const limit = FIELD_SIZE * 0.8;
+    if (Math.abs(fox.position.x) > limit || Math.abs(fox.position.z) > limit) {
+      foxWanderDir.negate();
+      fox.position.x = THREE.MathUtils.clamp(fox.position.x, -limit, limit);
+      fox.position.z = THREE.MathUtils.clamp(fox.position.z, -limit, limit);
+    }
+  } else if (dist > 0.1) {
+    // Chasing: original behavior with smooth blend from wander
+    toRabbit.normalize();
+    const blendedDirX = foxChaseBlend * toRabbit.x * foxSpeed + (1 - foxChaseBlend) * foxWanderDir.x * FOX_WANDER_SPEED;
+    const blendedDirZ = foxChaseBlend * toRabbit.z * foxSpeed + (1 - foxChaseBlend) * foxWanderDir.z * FOX_WANDER_SPEED;
+
+    fox.position.x += blendedDirX;
+    fox.position.z += blendedDirZ;
+
+    // Fox faces movement direction
+    const foxAngle = Math.atan2(blendedDirX, blendedDirZ);
     fox.rotation.y = THREE.MathUtils.lerp(fox.rotation.y, foxAngle, 0.1);
   }
 
   // Fox collision with trees and houses
   resolveObstacleCollisions(fox, 0.4);
 
-  animateFox(dt);
+  // Slower animation when wandering (relaxed fox)
+  animateFox(dt, foxChaseBlend);
 
   // --- NPC & Snake updates ---
   updateNPCRabbits(dt);
@@ -2416,11 +2498,13 @@ function update() {
   updateAnimalGreetings(dt);
   updateSpeechBubbles(dt);
 
-  // --- Fox warning sound ---
-  SoundEngine.updateFoxWarning(dist);
+  // --- Fox warning sound (suppressed in burrow safe zone) ---
+  // Increase effective distance when near burrow to fade out audio smoothly
+  const audioDist = rabbitNearBurrow ? dist + 20 * (1 - foxChaseBlend) : dist;
+  SoundEngine.updateFoxWarning(audioDist);
 
-  // --- Dynamic drum track (proximity tension) ---
-  SoundEngine.updateDrumTrack(dist);
+  // --- Dynamic drum track (proximity tension, fades near burrow) ---
+  SoundEngine.updateDrumTrack(audioDist);
 
   // --- Traffic Light Cycling ---
   trafficTimer += dt;
@@ -2484,9 +2568,9 @@ function update() {
     }
   }
 
-  // --- Fox catches rabbit ---
+  // --- Fox catches rabbit (not in burrow safe zone) ---
   const now = performance.now();
-  if (dist < CATCH_DISTANCE && now - lastCatchTime > CATCH_COOLDOWN) {
+  if (dist < CATCH_DISTANCE && !rabbitNearBurrow && now - lastCatchTime > CATCH_COOLDOWN) {
     lastCatchTime = now;
     SoundEngine.playFoxCatch();
     if (carrotsHeld > 0) {
