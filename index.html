@@ -2,12 +2,28 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kaninens Morotsspel</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
-canvas { display: block; }
+body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+canvas { display: block; touch-action: none; }
+#joystick-zone {
+  position: fixed; left: 0; top: 0; width: 50%; height: 100%;
+  z-index: 15; pointer-events: auto;
+}
+#joystick-base {
+  position: fixed; width: 120px; height: 120px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3);
+  pointer-events: none; z-index: 16; display: none;
+  transform: translate(-50%, -50%);
+}
+#joystick-stick {
+  position: fixed; width: 50px; height: 50px; border-radius: 50%;
+  background: rgba(255,255,255,0.5); border: 2px solid rgba(255,255,255,0.7);
+  pointer-events: none; z-index: 17; display: none;
+  transform: translate(-50%, -50%);
+}
 #hud {
   position: fixed; top: 20px; left: 20px; color: #fff;
   font-size: 18px; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
@@ -73,6 +89,9 @@ canvas { display: block; }
 </style>
 </head>
 <body>
+<div id="joystick-zone"></div>
+<div id="joystick-base"></div>
+<div id="joystick-stick"></div>
 <div id="hud">
   <div>🥕 Morötter: <span id="carrot-count">0</span></div>
   <div>🕳️ Gryta: <span id="burrow-status">0 / 20</span></div>
@@ -81,7 +100,7 @@ canvas { display: block; }
 </div>
 <div id="message"></div>
 <div id="screen-flash"></div>
-<div id="instructions">WASD för att röra dig · Samla morötter · Gå till grytan för att lämna · Undvik räven! · Vänta på 🐰 för att korsa vägar</div>
+<div id="instructions"><span id="instructions-desktop">WASD för att röra dig · </span><span id="instructions-touch" style="display:none">Tryck och dra för att röra dig · </span>Samla morötter · Gå till grytan för att lämna · Undvik räven! · Vänta på 🐰 för att korsa vägar</div>
 <canvas id="minimap" width="160" height="160"></canvas>
 <div id="volume-control">
   <button id="mute-btn">🔊</button>
@@ -497,6 +516,7 @@ function startAudio() {
 }
 window.addEventListener('keydown', startAudio, { once: false });
 window.addEventListener('click', startAudio, { once: false });
+window.addEventListener('touchstart', startAudio, { once: false });
 
 // --- Game Config ---
 const FIELD_SIZE = 40;
@@ -1136,6 +1156,75 @@ const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
+// --- Touch Joystick ---
+const touchState = { active: false, id: null, startX: 0, startY: 0, dirX: 0, dirZ: 0 };
+const joystickZone = document.getElementById('joystick-zone');
+const joystickBase = document.getElementById('joystick-base');
+const joystickStick = document.getElementById('joystick-stick');
+const JOYSTICK_RADIUS = 50;
+
+joystickZone.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (touchState.active) return;
+  const t = e.changedTouches[0];
+  touchState.active = true;
+  touchState.id = t.identifier;
+  touchState.startX = t.clientX;
+  touchState.startY = t.clientY;
+  touchState.dirX = 0;
+  touchState.dirZ = 0;
+  joystickBase.style.left = t.clientX + 'px';
+  joystickBase.style.top = t.clientY + 'px';
+  joystickBase.style.display = 'block';
+  joystickStick.style.left = t.clientX + 'px';
+  joystickStick.style.top = t.clientY + 'px';
+  joystickStick.style.display = 'block';
+}, { passive: false });
+
+joystickZone.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!touchState.active) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier !== touchState.id) continue;
+    let dx = t.clientX - touchState.startX;
+    let dy = t.clientY - touchState.startY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > JOYSTICK_RADIUS) {
+      dx = (dx / dist) * JOYSTICK_RADIUS;
+      dy = (dy / dist) * JOYSTICK_RADIUS;
+    }
+    joystickStick.style.left = (touchState.startX + dx) + 'px';
+    joystickStick.style.top = (touchState.startY + dy) + 'px';
+    const norm = Math.min(dist, JOYSTICK_RADIUS) / JOYSTICK_RADIUS;
+    if (norm > 0.15) {
+      touchState.dirX = (dx / Math.max(dist, JOYSTICK_RADIUS)) * norm;
+      touchState.dirZ = (dy / Math.max(dist, JOYSTICK_RADIUS)) * norm;
+    } else {
+      touchState.dirX = 0;
+      touchState.dirZ = 0;
+    }
+  }
+}, { passive: false });
+
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== touchState.id) continue;
+    touchState.active = false;
+    touchState.id = null;
+    touchState.dirX = 0;
+    touchState.dirZ = 0;
+    joystickBase.style.display = 'none';
+    joystickStick.style.display = 'none';
+  }
+}
+joystickZone.addEventListener('touchend', endTouch, { passive: false });
+joystickZone.addEventListener('touchcancel', endTouch, { passive: false });
+
+// Prevent default touch on the rest of the document to avoid gestures
+document.addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturechange', e => e.preventDefault(), { passive: false });
+document.addEventListener('gestureend', e => e.preventDefault(), { passive: false });
+
 // --- HUD ---
 const hudCarrots = document.getElementById('carrot-count');
 const hudBurrow = document.getElementById('burrow-status');
@@ -1420,6 +1509,11 @@ function update() {
   if (keys['s'] || keys['arrowdown']) moveDir.z -= 1;
   if (keys['a'] || keys['arrowleft']) moveDir.x += 1;
   if (keys['d'] || keys['arrowright']) moveDir.x -= 1;
+  // Touch joystick input (x maps to game x inverted, y maps to game z inverted)
+  if (touchState.active && (Math.abs(touchState.dirX) > 0 || Math.abs(touchState.dirZ) > 0)) {
+    moveDir.x -= touchState.dirX;
+    moveDir.z -= touchState.dirZ;
+  }
 
   const moving = moveDir.length() > 0;
   if (moving) {
@@ -1635,6 +1729,12 @@ function animate() {
 }
 
 animate();
+
+// --- Touch/Desktop instruction toggle ---
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+  document.getElementById('instructions-desktop').style.display = 'none';
+  document.getElementById('instructions-touch').style.display = 'inline';
+}
 
 // --- Resize ---
 window.addEventListener('resize', () => {
