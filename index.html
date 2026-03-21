@@ -692,13 +692,30 @@ sunLight.shadow.camera.bottom = -25;
 scene.add(sunLight);
 
 // --- Ground ---
-const groundGeo = new THREE.PlaneGeometry(FIELD_SIZE * 2, FIELD_SIZE * 2, 32, 32);
-// Add slight terrain undulation
+const groundGeo = new THREE.PlaneGeometry(FIELD_SIZE * 2, FIELD_SIZE * 2, 64, 64);
+// Add slight terrain undulation, but flatten under roads to prevent z-fighting
 const posAttr = groundGeo.getAttribute('position');
 for (let i = 0; i < posAttr.count; i++) {
   const x = posAttr.getX(i);
   const y = posAttr.getY(i);
-  posAttr.setZ(i, Math.sin(x * 0.3) * 0.2 + Math.cos(y * 0.2) * 0.15);
+  // After rotation.x = -PI/2: worldX = x, worldZ = -y, worldY = z
+  const worldX = x;
+  const worldZ = -y;
+  const terrainHeight = Math.sin(x * 0.3) * 0.2 + Math.cos(y * 0.2) * 0.15;
+  // Distance from nearest road edge (negative = inside road)
+  const hRoadDist = Math.abs(worldZ - ROAD_H_Z) - ROAD_WIDTH / 2;
+  const vRoadDist = Math.abs(worldX - ROAD_V_X) - ROAD_WIDTH / 2;
+  const roadDist = Math.min(hRoadDist, vRoadDist);
+  if (roadDist < 0) {
+    // Under a road: flatten below road surface
+    posAttr.setZ(i, -0.1);
+  } else if (roadDist < 2.0) {
+    // Smooth transition from flat to terrain
+    const t = roadDist / 2.0;
+    posAttr.setZ(i, -0.1 + (terrainHeight + 0.1) * t);
+  } else {
+    posAttr.setZ(i, terrainHeight);
+  }
 }
 groundGeo.computeVertexNormals();
 const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a8c3f });
@@ -736,20 +753,30 @@ for (let i = 0; i < 80; i++) {
 // --- Roads ---
 function createRoadSegment(length, width, isHorizontal) {
   const group = new THREE.Group();
-  const roadMat = new THREE.MeshLambertMaterial({ color: 0x505050 });
+  const roadMat = new THREE.MeshLambertMaterial({
+    color: 0x505050,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1
+  });
 
-  // Asphalt surface
+  // Asphalt surface — raised above flattened terrain
   const roadMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(isHorizontal ? length : width, isHorizontal ? width : length),
     roadMat
   );
   roadMesh.rotation.x = -Math.PI / 2;
-  roadMesh.position.y = 0.02;
+  roadMesh.position.y = 0.05;
   roadMesh.receiveShadow = true;
   group.add(roadMesh);
 
   // Dashed center line
-  const dashMat = new THREE.MeshLambertMaterial({ color: 0xffff55 });
+  const dashMat = new THREE.MeshLambertMaterial({
+    color: 0xffff55,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2
+  });
   const dashCount = Math.floor(length / 3);
   for (let i = 0; i < dashCount; i++) {
     const dash = new THREE.Mesh(
@@ -757,7 +784,7 @@ function createRoadSegment(length, width, isHorizontal) {
       dashMat
     );
     dash.rotation.x = -Math.PI / 2;
-    dash.position.y = 0.025;
+    dash.position.y = 0.06;
     const offset = (i - dashCount / 2) * 3;
     if (isHorizontal) dash.position.x = offset;
     else dash.position.z = offset;
@@ -765,14 +792,19 @@ function createRoadSegment(length, width, isHorizontal) {
   }
 
   // Road edge lines
-  const edgeMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const edgeMat = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2
+  });
   for (const side of [-1, 1]) {
     const edge = new THREE.Mesh(
       new THREE.PlaneGeometry(isHorizontal ? length : 0.15, isHorizontal ? 0.15 : length),
       edgeMat
     );
     edge.rotation.x = -Math.PI / 2;
-    edge.position.y = 0.025;
+    edge.position.y = 0.06;
     if (isHorizontal) edge.position.z = side * width / 2;
     else edge.position.x = side * width / 2;
     group.add(edge);
@@ -789,7 +821,7 @@ function createRoadSegment(length, width, isHorizontal) {
       ),
       curbMat
     );
-    curb.position.y = 0.06;
+    curb.position.y = 0.09;
     if (isHorizontal) curb.position.z = side * (width / 2 + 0.1);
     else curb.position.x = side * (width / 2 + 0.1);
     curb.castShadow = true;
@@ -813,7 +845,12 @@ scene.add(vRoad);
 // --- Crosswalks ---
 function createCrosswalk(x, z, crossesHorizontalRoad) {
   const group = new THREE.Group();
-  const stripeMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const stripeMat = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3
+  });
   const stripeCount = 8;
   const stripeWidth = 0.4;
   const stripeLength = ROAD_WIDTH - 0.2;
@@ -824,7 +861,7 @@ function createCrosswalk(x, z, crossesHorizontalRoad) {
     const h = crossesHorizontalRoad ? stripeWidth : stripeLength;
     const stripe = new THREE.Mesh(new THREE.PlaneGeometry(w, h), stripeMat);
     stripe.rotation.x = -Math.PI / 2;
-    stripe.position.y = 0.035;
+    stripe.position.y = 0.07;
     const offset = (i - stripeCount / 2 + 0.5) * (stripeWidth + gap);
     if (crossesHorizontalRoad) stripe.position.x = offset;
     else stripe.position.z = offset;
