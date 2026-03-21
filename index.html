@@ -59,7 +59,7 @@ canvas { display: block; }
 <body>
 <div id="hud">
   <div>🥕 Morötter: <span id="carrot-count">0</span></div>
-  <div>🕳️ Gryta: <span id="burrow-status">0 / 5</span></div>
+  <div>🕳️ Gryta: <span id="burrow-status">0 / 20</span></div>
   <div id="burrow-bar"><div id="burrow-fill" style="width:0%"></div></div>
   <div>🏆 Poäng: <span id="score">0</span></div>
 </div>
@@ -484,12 +484,12 @@ window.addEventListener('click', startAudio, { once: false });
 // --- Game Config ---
 const FIELD_SIZE = 40;
 const CARROT_COUNT = 15;
-const BURROW_CAPACITY = 5;
+const BURROW_CAPACITY = 20;
 const FOX_SPEED = 0.04;
 const RABBIT_SPEED = 0.08;
 const CATCH_DISTANCE = 1.2;
 const COLLECT_DISTANCE = 1.0;
-const DEPOSIT_DISTANCE = 1.5;
+const DEPOSIT_DISTANCE = 2.0;
 const CARROT_LOSS_ON_CATCH = 2;
 const CATCH_COOLDOWN = 2000; // ms
 const FOX_ACCEL = 0.0001; // fox gets faster over time
@@ -740,9 +740,9 @@ spawnCarrots(CARROT_COUNT);
 function createBurrow(pos) {
   const group = new THREE.Group();
 
-  // Hole (dark circle)
+  // Hole (dark circle) — sized to show up to 20 carrot indicators
   const hole = new THREE.Mesh(
-    new THREE.CircleGeometry(0.7, 16),
+    new THREE.CircleGeometry(1.1, 20),
     new THREE.MeshLambertMaterial({ color: 0x2a1a0a })
   );
   hole.rotation.x = -Math.PI / 2;
@@ -751,7 +751,7 @@ function createBurrow(pos) {
 
   // Dirt mound ring
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.7, 0.15, 8, 16),
+    new THREE.TorusGeometry(1.1, 0.18, 8, 20),
     new THREE.MeshLambertMaterial({ color: 0x8b6914 })
   );
   ring.rotation.x = -Math.PI / 2;
@@ -786,15 +786,20 @@ function updateBurrowVisuals() {
   }
   burrow.userData.fillIndicators = [];
 
-  // Add small carrots to show fill
+  // Add small carrots in two concentric rings to show fill
+  // Inner ring (first 10): r=0.35, Outer ring (next 10): r=0.75
+  const INNER_COUNT = Math.ceil(BURROW_CAPACITY / 2);
   for (let i = 0; i < burrowFill; i++) {
-    const angle = (i / BURROW_CAPACITY) * Math.PI * 2;
-    const r = 0.3;
+    const isInner = i < INNER_COUNT;
+    const ringIndex = isInner ? i : i - INNER_COUNT;
+    const ringTotal = isInner ? INNER_COUNT : BURROW_CAPACITY - INNER_COUNT;
+    const angle = (ringIndex / ringTotal) * Math.PI * 2;
+    const r = isInner ? 0.35 : 0.75;
     const mini = new THREE.Mesh(
-      new THREE.ConeGeometry(0.05, 0.2, 6),
+      new THREE.ConeGeometry(0.04, 0.16, 6),
       new THREE.MeshLambertMaterial({ color: 0xff7722 })
     );
-    mini.position.set(Math.cos(angle) * r, 0.15, Math.sin(angle) * r);
+    mini.position.set(Math.cos(angle) * r, 0.12, Math.sin(angle) * r);
     mini.rotation.x = Math.PI;
     burrow.add(mini);
     burrow.userData.fillIndicators.push(mini);
