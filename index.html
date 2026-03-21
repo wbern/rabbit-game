@@ -54,6 +54,22 @@ canvas { display: block; }
   background: none; border: none; color: #fff; font-size: 20px;
   cursor: pointer; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
 }
+.floating-text {
+  position: fixed; pointer-events: none; z-index: 20;
+  font-weight: bold; white-space: nowrap;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.7), -1px -1px 3px rgba(0,0,0,0.4);
+  animation: floatUp 1.2s ease-out forwards;
+}
+@keyframes floatUp {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  70% { opacity: 1; transform: translate(-50%, calc(-50% - 60px)) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, calc(-50% - 90px)) scale(0.8); }
+}
+#screen-flash {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 5; opacity: 0;
+  transition: opacity 0.1s;
+}
 </style>
 </head>
 <body>
@@ -64,6 +80,7 @@ canvas { display: block; }
   <div>🏆 Poäng: <span id="score">0</span></div>
 </div>
 <div id="message"></div>
+<div id="screen-flash"></div>
 <div id="instructions">WASD för att röra dig · Samla morötter · Gå till grytan för att lämna · Undvik räven!</div>
 <canvas id="minimap" width="160" height="160"></canvas>
 <div id="volume-control">
@@ -906,6 +923,151 @@ function drawMinimap() {
   ctx.stroke();
 }
 
+// --- Floating Text System ---
+function spawnFloatingText(worldPos, text, color = '#fff', size = 22) {
+  const el = document.createElement('div');
+  el.className = 'floating-text';
+  el.textContent = text;
+  el.style.color = color;
+  el.style.fontSize = size + 'px';
+  document.body.appendChild(el);
+
+  // Position once based on world coords at spawn time
+  const v = worldPos.clone();
+  v.y += 1.5;
+  v.project(camera);
+  const screenX = (v.x * 0.5 + 0.5) * window.innerWidth;
+  const screenY = (-v.y * 0.5 + 0.5) * window.innerHeight;
+  el.style.left = screenX + 'px';
+  el.style.top = screenY + 'px';
+
+  setTimeout(() => el.remove(), 1200);
+}
+
+// --- Screen Flash ---
+const screenFlash = document.getElementById('screen-flash');
+function flashScreen(color, duration = 300) {
+  screenFlash.style.background = color;
+  screenFlash.style.opacity = '0.4';
+  screenFlash.style.transition = `opacity ${duration}ms ease-out`;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      screenFlash.style.opacity = '0';
+    });
+  });
+}
+
+// --- 3D Particle System ---
+const activeParticles = [];
+
+function spawnParticles(origin, count, color, spread = 3, lifetime = 1.0, gravity = -4) {
+  for (let i = 0; i < count; i++) {
+    const geo = new THREE.SphereGeometry(0.06 + Math.random() * 0.06, 4, 4);
+    const mat = new THREE.MeshBasicMaterial({ color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(origin);
+    mesh.position.y += 0.5;
+    mesh.userData.vel = new THREE.Vector3(
+      (Math.random() - 0.5) * spread,
+      2 + Math.random() * 3,
+      (Math.random() - 0.5) * spread
+    );
+    mesh.userData.life = lifetime;
+    mesh.userData.maxLife = lifetime;
+    mesh.userData.gravity = gravity;
+    scene.add(mesh);
+    activeParticles.push(mesh);
+  }
+}
+
+function spawnConfetti(origin, count = 30) {
+  const confettiColors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff, 0xff8800];
+  for (let i = 0; i < count; i++) {
+    const geo = new THREE.PlaneGeometry(0.12, 0.08);
+    const mat = new THREE.MeshBasicMaterial({
+      color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(origin);
+    mesh.position.y += 0.5;
+    mesh.userData.vel = new THREE.Vector3(
+      (Math.random() - 0.5) * 5,
+      4 + Math.random() * 4,
+      (Math.random() - 0.5) * 5
+    );
+    mesh.userData.life = 2.0;
+    mesh.userData.maxLife = 2.0;
+    mesh.userData.gravity = -3;
+    mesh.userData.spin = new THREE.Vector3(
+      (Math.random() - 0.5) * 10,
+      (Math.random() - 0.5) * 10,
+      (Math.random() - 0.5) * 10
+    );
+    scene.add(mesh);
+    activeParticles.push(mesh);
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = activeParticles.length - 1; i >= 0; i--) {
+    const p = activeParticles[i];
+    p.userData.life -= dt;
+    if (p.userData.life <= 0) {
+      scene.remove(p);
+      p.geometry.dispose();
+      p.material.dispose();
+      activeParticles.splice(i, 1);
+      continue;
+    }
+    p.userData.vel.y += p.userData.gravity * dt;
+    p.position.x += p.userData.vel.x * dt;
+    p.position.y += p.userData.vel.y * dt;
+    p.position.z += p.userData.vel.z * dt;
+    if (p.position.y < 0) {
+      p.position.y = 0;
+      p.userData.vel.y *= -0.3;
+    }
+    const alpha = p.userData.life / p.userData.maxLife;
+    p.material.opacity = alpha;
+    p.material.transparent = true;
+    if (p.userData.spin) {
+      p.rotation.x += p.userData.spin.x * dt;
+      p.rotation.y += p.userData.spin.y * dt;
+      p.rotation.z += p.userData.spin.z * dt;
+    }
+    p.scale.setScalar(0.5 + alpha * 0.5);
+  }
+}
+
+// --- Burrow Blink Effect ---
+let burrowBlinkTime = 0;
+let burrowBlinking = false;
+
+function startBurrowBlink() {
+  burrowBlinking = true;
+  burrowBlinkTime = 0;
+}
+
+function updateBurrowBlink(dt) {
+  if (!burrowBlinking || !burrow) return;
+  burrowBlinkTime += dt;
+  if (burrowBlinkTime > 2.0) {
+    burrowBlinking = false;
+    burrow.children.forEach(c => {
+      if (c.isMesh && c.material) c.material.emissive?.setHex(0x000000);
+    });
+    return;
+  }
+  const blink = Math.sin(burrowBlinkTime * 12) * 0.5 + 0.5;
+  burrow.children.forEach(c => {
+    if (c.isMesh && c.material && c.material.emissive) {
+      c.material.emissive.setHex(0x443300);
+      c.material.emissiveIntensity = blink * 0.8;
+    }
+  });
+}
+
 // --- Camera ---
 const cameraOffset = new THREE.Vector3(0, 8, -10);
 
@@ -1009,6 +1171,9 @@ function update() {
       const lost = Math.min(carrotsHeld, CARROT_LOSS_ON_CATCH);
       carrotsHeld -= lost;
       showMessage(`🦊 Räven stal ${lost} ${lost > 1 ? 'morötter' : 'morot'}!`);
+      flashScreen('rgba(255, 0, 0, 0.6)', 400);
+      spawnFloatingText(rabbit.position.clone(), `-${lost} 🥕`, '#ff4444', 28);
+      spawnParticles(rabbit.position.clone(), 12, 0xff6600, 4, 1.2, -5);
       // Scatter lost carrots near fox
       for (let i = 0; i < lost; i++) {
         const carrot = createCarrot();
@@ -1022,6 +1187,7 @@ function update() {
       }
     } else {
       showMessage('🦊 Räven nafsar på dig! Inga morötter att stjäla.');
+      flashScreen('rgba(255, 100, 0, 0.3)', 300);
     }
     // Push fox back
     fox.position.x = rabbit.position.x - toRabbit.x * 5;
@@ -1033,10 +1199,13 @@ function update() {
     const c = carrots[i];
     const d = rabbit.position.distanceTo(c.position);
     if (d < COLLECT_DISTANCE) {
+      const collectPos = c.position.clone();
       scene.remove(c);
       carrots.splice(i, 1);
       carrotsHeld++;
       SoundEngine.playCarrotPickup();
+      spawnFloatingText(collectPos, '+1 🥕', '#ffcc00', 24);
+      spawnParticles(collectPos, 6, 0xff8800, 1.5, 0.8, -3);
       // Spawn replacement carrot elsewhere
       const newCarrot = createCarrot();
       newCarrot.position.copy(randomFieldPos());
@@ -1057,11 +1226,22 @@ function update() {
         updateBurrowVisuals();
         SoundEngine.playDeposit();
         showMessage(`+${deposit * 10} poäng! Lämnade ${deposit} ${deposit > 1 ? 'morötter' : 'morot'}`);
+        spawnFloatingText(burrow.position.clone(), `+${deposit * 10} ⭐`, '#44ff88', 26);
+        spawnParticles(burrow.position.clone(), 8, 0x44ff88, 2, 1.0, -2);
+        flashScreen('rgba(0, 255, 100, 0.2)', 250);
 
         if (burrowFill >= BURROW_CAPACITY) {
           SoundEngine.playBurrowFull();
           showMessage('🕳️ Grytan är full! En ny har dykt upp!', 3000);
-          setTimeout(() => { SoundEngine.playNewHole(); spawnBurrow(); }, 1500);
+          spawnConfetti(burrow.position.clone(), 40);
+          flashScreen('rgba(255, 215, 0, 0.4)', 500);
+          spawnFloatingText(burrow.position.clone(), '🎉 FULL!', '#ffd700', 32);
+          setTimeout(() => {
+            SoundEngine.playNewHole();
+            spawnBurrow();
+            startBurrowBlink();
+            spawnFloatingText(burrow.position.clone(), '🕳️ NEW!', '#88ddff', 28);
+          }, 1500);
         }
       }
     }
@@ -1076,6 +1256,10 @@ function update() {
     const pulse = dBurrow < 3 ? 1 + Math.sin(gameTime * 4) * 0.05 : 1;
     burrow.scale.setScalar(pulse);
   }
+
+  // Update visual effects
+  updateParticles(dt);
+  updateBurrowBlink(dt);
 
   updateHUD();
   updateCamera();
