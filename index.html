@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sv">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rabbit Carrot Game</title>
+<title>Kaninens Morotsspel</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
@@ -45,13 +45,13 @@ canvas { display: block; }
 </head>
 <body>
 <div id="hud">
-  <div>🥕 Carrots: <span id="carrot-count">0</span></div>
-  <div>🕳️ Burrow: <span id="burrow-status">0 / 5</span></div>
+  <div>🥕 Morötter: <span id="carrot-count">0</span></div>
+  <div>🕳️ Gryta: <span id="burrow-status">0 / 5</span></div>
   <div id="burrow-bar"><div id="burrow-fill" style="width:0%"></div></div>
-  <div>🏆 Score: <span id="score">0</span></div>
+  <div>🏆 Poäng: <span id="score">0</span></div>
 </div>
 <div id="message"></div>
-<div id="instructions">WASD to move · Collect carrots · Walk over burrow to deposit · Avoid the fox!</div>
+<div id="instructions">WASD för att röra dig · Samla morötter · Gå till grytan för att lämna · Undvik räven!</div>
 <canvas id="minimap" width="160" height="160"></canvas>
 
 <script type="importmap">
@@ -581,7 +581,7 @@ function update() {
     if (carrotsHeld > 0) {
       const lost = Math.min(carrotsHeld, CARROT_LOSS_ON_CATCH);
       carrotsHeld -= lost;
-      showMessage(`🦊 The fox stole ${lost} carrot${lost > 1 ? 's' : ''}!`);
+      showMessage(`🦊 Räven stal ${lost} ${lost > 1 ? 'morötter' : 'morot'}!`);
       // Scatter lost carrots near fox
       for (let i = 0; i < lost; i++) {
         const carrot = createCarrot();
@@ -594,7 +594,7 @@ function update() {
         carrots.push(carrot);
       }
     } else {
-      showMessage('🦊 The fox nips at you! No carrots to steal.');
+      showMessage('🦊 Räven nafsar på dig! Inga morötter att stjäla.');
     }
     // Push fox back
     fox.position.x = rabbit.position.x - toRabbit.x * 5;
@@ -627,10 +627,10 @@ function update() {
         burrowFill += deposit;
         totalScore += deposit * 10;
         updateBurrowVisuals();
-        showMessage(`+${deposit * 10} points! Deposited ${deposit} carrot${deposit > 1 ? 's' : ''}`);
+        showMessage(`+${deposit * 10} poäng! Lämnade ${deposit} ${deposit > 1 ? 'morötter' : 'morot'}`);
 
         if (burrowFill >= BURROW_CAPACITY) {
-          showMessage('🕳️ Burrow full! A new one appeared!', 3000);
+          showMessage('🕳️ Grytan är full! En ny har dykt upp!', 3000);
           setTimeout(() => spawnBurrow(), 1500);
         }
       }
