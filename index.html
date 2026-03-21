@@ -526,6 +526,91 @@ const SoundEngine = (() => {
     osc.stop(t + 0.1);
   }
 
+  // --- Animal Greeting Sounds ---
+
+  function playRabbitSqueak() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Cute squeak - quick ascending chirp
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, t);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(800, t + 0.12);
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.15);
+
+    // Second pip slightly delayed
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(800, t + 0.1);
+    osc2.frequency.exponentialRampToValueAtTime(1400, t + 0.16);
+    osc2.frequency.exponentialRampToValueAtTime(900, t + 0.22);
+    gain2.gain.setValueAtTime(0.12, t + 0.1);
+    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+    osc2.connect(gain2).connect(sfxGain);
+    osc2.start(t + 0.1);
+    osc2.stop(t + 0.25);
+  }
+
+  function playSnakeHiss() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Hissing: filtered noise with high-frequency emphasis
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(0.4);
+    const nGain = ctx.createGain();
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'bandpass';
+    nFilter.frequency.value = 5000;
+    nFilter.Q.value = 0.8;
+    nGain.gain.setValueAtTime(0, t);
+    nGain.gain.linearRampToValueAtTime(0.12, t + 0.05);
+    nGain.gain.setValueAtTime(0.12, t + 0.2);
+    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    noise.connect(nFilter).connect(nGain).connect(sfxGain);
+    noise.start(t);
+    noise.stop(t + 0.4);
+  }
+
+  function playFoxBark() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Short yip/bark - quick frequency drop
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(400, t);
+    osc.frequency.exponentialRampToValueAtTime(180, t + 0.1);
+    gain.gain.setValueAtTime(0.12, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.15);
+
+    // Breathy noise layer
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(0.12);
+    const nGain = ctx.createGain();
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'bandpass';
+    nFilter.frequency.value = 2000;
+    nFilter.Q.value = 1;
+    nGain.gain.setValueAtTime(0.08, t);
+    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.12);
+    noise.connect(nFilter).connect(nGain).connect(sfxGain);
+    noise.start(t);
+    noise.stop(t + 0.12);
+  }
+
   // --- Background Music ---
   // Simple pentatonic melody loop
 
@@ -609,7 +694,8 @@ const SoundEngine = (() => {
   return {
     init, setVolume, toggleMute, startMusic, stopMusic,
     playCarrotPickup, playDeposit, updateFoxWarning, updateDrumTrack,
-    playFoxCatch, playBurrowFull, playNewHole, playHop
+    playFoxCatch, playBurrowFull, playNewHole, playHop,
+    playRabbitSqueak, playSnakeHiss, playFoxBark
   };
 })();
 
@@ -663,6 +749,9 @@ const CAR_HIT_DISTANCE = 1.3;
 const CAR_HIT_COOLDOWN = 3000; // ms
 const CARROT_LOSS_ON_HIT = 3;
 const TRAFFIC_CYCLE = 6;   // seconds per phase
+const GREET_DISTANCE = 4;  // proximity to trigger greeting
+const GREET_COOLDOWN = 8;  // seconds between greetings per NPC
+const GREET_BUBBLE_DURATION = 2.5; // seconds bubble stays visible
 
 // --- Scene Setup ---
 const scene = new THREE.Scene();
@@ -1536,7 +1625,8 @@ function createNPCRabbit() {
     changeTimer: Math.random() * 3,
     state: 'walking',
     idleTimer: 0,
-    hopPhase: Math.random() * Math.PI * 2
+    hopPhase: Math.random() * Math.PI * 2,
+    greetCooldown: 0
   };
 
   return group;
@@ -1598,7 +1688,8 @@ function createSnake() {
     direction: Math.random() * Math.PI * 2,
     changeTimer: 2 + Math.random() * 4,
     tongueTimer: 0,
-    phase: Math.random() * Math.PI * 2
+    phase: Math.random() * Math.PI * 2,
+    greetCooldown: 0
   };
 
   return group;
@@ -1833,6 +1924,134 @@ function flashScreen(color, duration = 300) {
       screenFlash.style.opacity = '0';
     });
   });
+}
+
+// --- 3D Speech Bubble System ---
+const activeBubbles = [];
+
+function createSpeechBubbleTexture(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  // Draw rounded bubble
+  const pad = 16;
+  const w = canvas.width - pad * 2;
+  const h = canvas.height - pad * 2 - 16; // leave room for tail
+  const r = 16;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.beginPath();
+  ctx.moveTo(pad + r, pad);
+  ctx.lineTo(pad + w - r, pad);
+  ctx.quadraticCurveTo(pad + w, pad, pad + w, pad + r);
+  ctx.lineTo(pad + w, pad + h - r);
+  ctx.quadraticCurveTo(pad + w, pad + h, pad + w - r, pad + h);
+  // Tail
+  ctx.lineTo(canvas.width / 2 + 10, pad + h);
+  ctx.lineTo(canvas.width / 2, pad + h + 14);
+  ctx.lineTo(canvas.width / 2 - 10, pad + h);
+  ctx.lineTo(pad + r, pad + h);
+  ctx.quadraticCurveTo(pad, pad + h, pad, pad + h - r);
+  ctx.lineTo(pad, pad + r);
+  ctx.quadraticCurveTo(pad, pad, pad + r, pad);
+  ctx.closePath();
+  ctx.fill();
+
+  // Border
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Text
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 36px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, canvas.width / 2, pad + h / 2);
+
+  return new THREE.CanvasTexture(canvas);
+}
+
+function spawnSpeechBubble(parent, text, heightOffset) {
+  const texture = createSpeechBubbleTexture(text);
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(0, heightOffset, 0);
+  sprite.scale.set(1.8, 0.9, 1);
+  parent.add(sprite);
+
+  activeBubbles.push({
+    sprite,
+    parent,
+    life: GREET_BUBBLE_DURATION,
+    maxLife: GREET_BUBBLE_DURATION
+  });
+}
+
+function updateSpeechBubbles(dt) {
+  for (let i = activeBubbles.length - 1; i >= 0; i--) {
+    const b = activeBubbles[i];
+    b.life -= dt;
+
+    // Fade out in last 0.5 seconds
+    if (b.life < 0.5) {
+      b.sprite.material.opacity = Math.max(0, b.life / 0.5);
+    }
+
+    if (b.life <= 0) {
+      b.parent.remove(b.sprite);
+      b.sprite.material.map.dispose();
+      b.sprite.material.dispose();
+      activeBubbles.splice(i, 1);
+    }
+  }
+}
+
+// --- Animal Greeting Logic ---
+function updateAnimalGreetings(dt) {
+  // NPC Rabbits
+  for (const npc of npcRabbits) {
+    const ud = npc.userData;
+    if (ud.greetCooldown > 0) {
+      ud.greetCooldown -= dt;
+      continue;
+    }
+    const d = rabbit.position.distanceTo(npc.position);
+    if (d < GREET_DISTANCE) {
+      ud.greetCooldown = GREET_COOLDOWN;
+      SoundEngine.playRabbitSqueak();
+      spawnSpeechBubble(npc, 'Hej!', 1.6 * npc.scale.x);
+    }
+  }
+
+  // Snakes
+  for (const snake of snakes) {
+    const ud = snake.userData;
+    if (ud.greetCooldown > 0) {
+      ud.greetCooldown -= dt;
+      continue;
+    }
+    const d = rabbit.position.distanceTo(snake.position);
+    if (d < GREET_DISTANCE) {
+      ud.greetCooldown = GREET_COOLDOWN;
+      SoundEngine.playSnakeHiss();
+      spawnSpeechBubble(snake, 'Ssssss', 0.5);
+    }
+  }
+
+  // Fox — only greets when far enough away (not in chase mode, dist > 8)
+  if (!fox.userData.greetCooldown) fox.userData.greetCooldown = 0;
+  if (fox.userData.greetCooldown > 0) {
+    fox.userData.greetCooldown -= dt;
+  } else {
+    const foxDist = rabbit.position.distanceTo(fox.position);
+    if (foxDist < GREET_DISTANCE + 2 && foxDist > GREET_DISTANCE) {
+      fox.userData.greetCooldown = GREET_COOLDOWN;
+      SoundEngine.playFoxBark();
+      spawnSpeechBubble(fox, 'Yip!', 1.5);
+    }
+  }
 }
 
 // --- 3D Particle System ---
@@ -2162,6 +2381,10 @@ function update() {
   // --- NPC & Snake updates ---
   updateNPCRabbits(dt);
   updateSnakes(dt);
+
+  // --- Animal Greetings ---
+  updateAnimalGreetings(dt);
+  updateSpeechBubbles(dt);
 
   // --- Fox warning sound ---
   SoundEngine.updateFoxWarning(dist);
