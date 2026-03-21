@@ -279,43 +279,40 @@ const SoundEngine = (() => {
     ensureContext();
     const t = ctx.currentTime;
 
-    // Dramatic descending tone
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(800, t);
-    osc.frequency.exponentialRampToValueAtTime(100, t + 0.4);
-    gain.gain.setValueAtTime(0.2, t);
-    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-    osc.connect(gain).connect(sfxGain);
-    osc.start(t);
-    osc.stop(t + 0.5);
+    // Cartoon "bonk" — short rounded pop
+    const bonk = ctx.createOscillator();
+    const bonkGain = ctx.createGain();
+    bonk.type = 'sine';
+    bonk.frequency.setValueAtTime(600, t);
+    bonk.frequency.exponentialRampToValueAtTime(200, t + 0.15);
+    bonkGain.gain.setValueAtTime(0.25, t);
+    bonkGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+    bonk.connect(bonkGain).connect(sfxGain);
+    bonk.start(t);
+    bonk.stop(t + 0.2);
 
-    // Impact noise
-    const noise = ctx.createBufferSource();
-    noise.buffer = noiseBuffer(0.15);
-    const nGain = ctx.createGain();
-    const nFilter = ctx.createBiquadFilter();
-    nFilter.type = 'lowpass';
-    nFilter.frequency.value = 1000;
-    nGain.gain.setValueAtTime(0.25, t);
-    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-    noise.connect(nFilter).connect(nGain).connect(sfxGain);
-    noise.start(t);
-    noise.stop(t + 0.3);
+    // Comical "womp womp" — two descending triangle tones
+    const womp1 = ctx.createOscillator();
+    const womp1Gain = ctx.createGain();
+    womp1.type = 'triangle';
+    womp1.frequency.setValueAtTime(350, t + 0.15);
+    womp1.frequency.exponentialRampToValueAtTime(200, t + 0.4);
+    womp1Gain.gain.setValueAtTime(0.18, t + 0.15);
+    womp1Gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    womp1.connect(womp1Gain).connect(sfxGain);
+    womp1.start(t + 0.15);
+    womp1.stop(t + 0.4);
 
-    // Secondary alarm tone
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'square';
-    osc2.frequency.setValueAtTime(300, t + 0.1);
-    osc2.frequency.setValueAtTime(200, t + 0.2);
-    osc2.frequency.setValueAtTime(150, t + 0.3);
-    gain2.gain.setValueAtTime(0.1, t + 0.1);
-    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.45);
-    osc2.connect(gain2).connect(sfxGain);
-    osc2.start(t + 0.1);
-    osc2.stop(t + 0.45);
+    const womp2 = ctx.createOscillator();
+    const womp2Gain = ctx.createGain();
+    womp2.type = 'triangle';
+    womp2.frequency.setValueAtTime(280, t + 0.4);
+    womp2.frequency.exponentialRampToValueAtTime(140, t + 0.7);
+    womp2Gain.gain.setValueAtTime(0.18, t + 0.4);
+    womp2Gain.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
+    womp2.connect(womp2Gain).connect(sfxGain);
+    womp2.start(t + 0.4);
+    womp2.stop(t + 0.7);
   }
 
   function playBurrowFull() {
