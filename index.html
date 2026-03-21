@@ -1257,15 +1257,19 @@ function createFox() {
   head.position.set(0, 0.75, 0.55);
   group.add(head);
 
-  // Snout
-  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 8), whiteMat);
-  snout.rotation.x = -Math.PI / 2;
-  snout.position.set(0, 0.68, 0.82);
-  group.add(snout);
+  // Snout — elongated fox muzzle (two tapered sections)
+  const snoutBase = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.2, 8), foxMat);
+  snoutBase.rotation.x = -Math.PI / 2;
+  snoutBase.position.set(0, 0.68, 0.72);
+  group.add(snoutBase);
+  const snoutTip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.25, 8), whiteMat);
+  snoutTip.rotation.x = -Math.PI / 2;
+  snoutTip.position.set(0, 0.65, 0.9);
+  group.add(snoutTip);
 
-  // Nose
-  const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), darkMat);
-  noseTip.position.set(0, 0.68, 0.97);
+  // Nose — small dark tip at the end
+  const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), darkMat);
+  noseTip.position.set(0, 0.65, 1.03);
   group.add(noseTip);
 
   // Ears
@@ -1282,14 +1286,36 @@ function createFox() {
     group.add(eye);
   }
 
-  // Tail
-  const tail = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.6, 6, 8), foxMat);
-  tail.position.set(0, 0.45, -0.85);
-  tail.rotation.x = 0.4;
-  group.add(tail);
-  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), whiteMat);
-  tailTip.position.set(0, 0.55, -1.1);
-  group.add(tailTip);
+  // Tail — long, fluffy, curved fox tail (3 segments for a nice curve)
+  const tailGroup = new THREE.Group();
+  tailGroup.position.set(0, 0.45, -0.55);
+  tailGroup.rotation.x = 0.3;
+
+  // Base segment (thickest)
+  const tailBase = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.35, 6, 8), foxMat);
+  tailBase.position.set(0, 0.05, -0.18);
+  tailBase.rotation.x = 0.3;
+  tailGroup.add(tailBase);
+
+  // Middle segment
+  const tailMid = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.3, 6, 8), foxMat);
+  tailMid.position.set(0, 0.18, -0.48);
+  tailMid.rotation.x = 0.6;
+  tailGroup.add(tailMid);
+
+  // Tip segment (tapered, white)
+  const tailEnd = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.25, 6, 8), whiteMat);
+  tailEnd.position.set(0, 0.38, -0.7);
+  tailEnd.rotation.x = 0.8;
+  tailGroup.add(tailEnd);
+
+  // Fluffy white tip
+  const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), whiteMat);
+  tailTip.position.set(0, 0.52, -0.82);
+  tailGroup.add(tailTip);
+
+  group.add(tailGroup);
+  group.userData.tailGroup = tailGroup;
 
   // Legs
   for (const side of [-1, 1]) {
@@ -2196,6 +2222,10 @@ function animateFox(dt) {
   foxAnimPhase += dt * 8;
   const groundY = getTerrainHeight(fox.position.x, fox.position.z);
   fox.position.y = groundY + Math.abs(Math.sin(foxAnimPhase)) * 0.1;
+  // Tail wag
+  if (fox.userData.tailGroup) {
+    fox.userData.tailGroup.rotation.y = Math.sin(foxAnimPhase * 1.5) * 0.3;
+  }
 }
 
 // Carrot bob
