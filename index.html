@@ -123,9 +123,13 @@ const SoundEngine = (() => {
   let masterGain = null;
   let musicGain = null;
   let sfxGain = null;
+  let drumGain = null;
   let muted = false;
   let musicPlaying = false;
   let musicNodes = [];
+  let drumLoopActive = false;
+  let drumLoopTimer = null;
+  let drumIntensity = 0;
 
   function init() {
     if (ctx) return;
@@ -141,6 +145,10 @@ const SoundEngine = (() => {
     sfxGain = ctx.createGain();
     sfxGain.gain.value = 0.6;
     sfxGain.connect(masterGain);
+
+    drumGain = ctx.createGain();
+    drumGain.gain.value = 0;
+    drumGain.connect(masterGain);
   }
 
   function ensureContext() {
@@ -273,6 +281,123 @@ const SoundEngine = (() => {
     foxWarningLfo.frequency.setTargetAtTime(1.5 + intensity * 4, ctx.currentTime, 0.1);
     foxWarningGain.gain.setTargetAtTime(intensity * 0.15, ctx.currentTime, 0.1);
     foxWarningOsc.frequency.setTargetAtTime(50 + intensity * 30, ctx.currentTime, 0.1);
+  }
+
+  // --- Dynamic drum track based on fox proximity ---
+
+  function playDrumHit(time, type) {
+    // Synthesize drum sounds using noise and oscillators
+    if (type === 'kick') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(150, time);
+      osc.frequency.exponentialRampToValueAtTime(40, time + 0.12);
+      gain.gain.setValueAtTime(0.7, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+      osc.connect(gain).connect(drumGain);
+      osc.start(time);
+      osc.stop(time + 0.15);
+    } else if (type === 'snare') {
+      // Noise burst for snare body
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer(0.08);
+      const nGain = ctx.createGain();
+      const nFilter = ctx.createBiquadFilter();
+      nFilter.type = 'bandpass';
+      nFilter.frequency.value = 4000;
+      nFilter.Q.value = 1;
+      nGain.gain.setValueAtTime(0.4, time);
+      nGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+      noise.connect(nFilter).connect(nGain).connect(drumGain);
+      noise.start(time);
+      noise.stop(time + 0.1);
+      // Tonal snap
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(200, time);
+      osc.frequency.exponentialRampToValueAtTime(100, time + 0.06);
+      gain.gain.setValueAtTime(0.3, time);
+      gain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
+      osc.connect(gain).connect(drumGain);
+      osc.start(time);
+      osc.stop(time + 0.08);
+    } else if (type === 'hihat') {
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuffer(0.04);
+      const nGain = ctx.createGain();
+      const nFilter = ctx.createBiquadFilter();
+      nFilter.type = 'highpass';
+      nFilter.frequency.value = 8000;
+      nGain.gain.setValueAtTime(0.2, time);
+      nGain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+      noise.connect(nFilter).connect(nGain).connect(drumGain);
+      noise.start(time);
+      noise.stop(time + 0.05);
+    }
+  }
+
+  function scheduleDrumMeasure() {
+    if (!drumLoopActive) return;
+    const t = ctx.currentTime;
+    // BPM scales with intensity: 100 BPM at low intensity, 140 BPM at max
+    const bpm = 100 + drumIntensity * 40;
+    const beatDur = 60 / bpm;
+    const beats = 8;
+
+    for (let i = 0; i < beats; i++) {
+      const beatTime = t + i * beatDur;
+      // Kick on beats 0, 2, 4, 6 (quarter notes)
+      if (i % 2 === 0) {
+        playDrumHit(beatTime, 'kick');
+      }
+      // Snare on beats 2, 6 (backbeat)
+      if (i === 2 || i === 6) {
+        playDrumHit(beatTime, 'snare');
+      }
+      // Hi-hat on every beat at higher intensity
+      if (drumIntensity > 0.3) {
+        playDrumHit(beatTime, 'hihat');
+      }
+      // Extra hi-hats on off-beats at high intensity
+      if (drumIntensity > 0.6 && i % 2 === 1) {
+        playDrumHit(beatTime, 'hihat');
+      }
+    }
+
+    const measureDur = beats * beatDur;
+    drumLoopTimer = setTimeout(scheduleDrumMeasure, measureDur * 1000 - 50);
+  }
+
+  function updateDrumTrack(distance) {
+    ensureContext();
+    const threshold = 12;
+    if (distance > threshold) {
+      // Fade out and stop drum loop
+      if (drumLoopActive) {
+        drumGain.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+        drumLoopActive = false;
+        if (drumLoopTimer) {
+          clearTimeout(drumLoopTimer);
+          drumLoopTimer = null;
+        }
+      }
+      drumIntensity = 0;
+      return;
+    }
+
+    drumIntensity = 1 - (distance / threshold); // 0 to 1
+
+    // Volume scales with intensity, max 0.2 to not overpower music
+    const targetVol = drumIntensity * 0.2;
+    drumGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.15);
+
+    // Start drum loop if not active
+    if (!drumLoopActive) {
+      drumLoopActive = true;
+      scheduleDrumMeasure();
+    }
   }
 
   function playFoxCatch() {
@@ -483,7 +608,7 @@ const SoundEngine = (() => {
 
   return {
     init, setVolume, toggleMute, startMusic, stopMusic,
-    playCarrotPickup, playDeposit, updateFoxWarning,
+    playCarrotPickup, playDeposit, updateFoxWarning, updateDrumTrack,
     playFoxCatch, playBurrowFull, playNewHole, playHop
   };
 })();
@@ -1594,6 +1719,9 @@ function update() {
 
   // --- Fox warning sound ---
   SoundEngine.updateFoxWarning(dist);
+
+  // --- Dynamic drum track (proximity tension) ---
+  SoundEngine.updateDrumTrack(dist);
 
   // --- Traffic Light Cycling ---
   trafficTimer += dt;
