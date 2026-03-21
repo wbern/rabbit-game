@@ -1306,6 +1306,249 @@ function updateBurrowVisuals() {
 
 spawnBurrow();
 
+// --- Trees ---
+function createTree(size) {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+  const leafMat = new THREE.MeshLambertMaterial({ color: 0x228B22 + Math.floor(Math.random() * 0x002000) });
+
+  const scales = { small: 0.6, medium: 1.0, large: 1.4 };
+  const s = scales[size] || 1.0;
+
+  // Trunk
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * s, 0.15 * s, 1.5 * s, 6), trunkMat);
+  trunk.position.y = 0.75 * s;
+  group.add(trunk);
+
+  // Foliage layers
+  const foliage1 = new THREE.Mesh(new THREE.ConeGeometry(0.8 * s, 1.2 * s, 8), leafMat);
+  foliage1.position.y = 1.8 * s;
+  group.add(foliage1);
+
+  const foliage2 = new THREE.Mesh(new THREE.ConeGeometry(0.6 * s, 0.9 * s, 8), leafMat);
+  foliage2.position.y = 2.4 * s;
+  group.add(foliage2);
+
+  group.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  return group;
+}
+
+const treeSizes = ['small', 'medium', 'large'];
+for (let i = 0; i < 25; i++) {
+  const tree = createTree(treeSizes[Math.floor(Math.random() * treeSizes.length)]);
+  const pos = randomFieldPos();
+  tree.position.copy(pos);
+  tree.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(tree);
+}
+
+// --- Bushes ---
+function createBush() {
+  const group = new THREE.Group();
+  const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d7a1e + Math.floor(Math.random() * 0x001500) });
+
+  for (let i = 0; i < 3; i++) {
+    const s = 0.25 + Math.random() * 0.2;
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), leafMat);
+    sphere.position.set((Math.random() - 0.5) * 0.3, s * 0.7, (Math.random() - 0.5) * 0.3);
+    sphere.scale.y = 0.7;
+    group.add(sphere);
+  }
+
+  group.traverse(c => { if (c.isMesh) { c.castShadow = true; } });
+  return group;
+}
+
+for (let i = 0; i < 30; i++) {
+  const bush = createBush();
+  const pos = randomFieldPos();
+  bush.position.copy(pos);
+  scene.add(bush);
+}
+
+// --- Houses ---
+function createHouse() {
+  const group = new THREE.Group();
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0xd4a574 });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x8b2500 });
+  const doorMat = new THREE.MeshLambertMaterial({ color: 0x654321 });
+  const windowMat = new THREE.MeshLambertMaterial({ color: 0x87ceeb, transparent: true, opacity: 0.7 });
+
+  // Walls
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 1.5), wallMat);
+  walls.position.y = 0.75;
+  group.add(walls);
+
+  // Roof
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.0, 4), roofMat);
+  roof.position.y = 2.0;
+  roof.rotation.y = Math.PI / 4;
+  group.add(roof);
+
+  // Door
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.8, 0.05), doorMat);
+  door.position.set(0, 0.4, 0.76);
+  group.add(door);
+
+  // Windows
+  for (const side of [-1, 1]) {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.05), windowMat);
+    win.position.set(side * 0.6, 1.0, 0.76);
+    group.add(win);
+  }
+
+  group.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  return group;
+}
+
+for (let i = 0; i < 3; i++) {
+  const house = createHouse();
+  let pos;
+  do {
+    pos = randomFieldPos();
+  } while (pos.distanceTo(new THREE.Vector3(0, 0, 0)) < 8); // not too close to start
+  house.position.copy(pos);
+  house.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(house);
+}
+
+// --- NPC Rabbits ---
+function createNPCRabbit() {
+  const group = new THREE.Group();
+  const colors = [0xc0b090, 0xaaa080, 0xb8a888, 0x9e8e70, 0xc8b898];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const bodyMat = new THREE.MeshLambertMaterial({ color });
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const pinkMat = new THREE.MeshLambertMaterial({ color: 0xffb6c1 });
+  const darkMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+
+  // Body
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 8), bodyMat);
+  body.scale.set(1, 0.85, 1.2);
+  body.position.y = 0.45;
+  group.add(body);
+
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), bodyMat);
+  head.position.set(0, 0.85, 0.35);
+  group.add(head);
+
+  // Ears
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.3, 4, 6), bodyMat);
+    ear.position.set(side * 0.1, 1.25, 0.28);
+    ear.rotation.z = side * 0.2;
+    group.add(ear);
+    const earInner = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.2, 4, 6), pinkMat);
+    earInner.position.set(side * 0.1, 1.23, 0.3);
+    earInner.rotation.z = side * 0.2;
+    group.add(earInner);
+  }
+
+  // Eyes
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 4), darkMat);
+    eye.position.set(side * 0.1, 0.9, 0.58);
+    group.add(eye);
+  }
+
+  // Nose
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), pinkMat);
+  nose.position.set(0, 0.82, 0.62);
+  group.add(nose);
+
+  // Tail
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 4), whiteMat);
+  tail.position.set(0, 0.45, -0.5);
+  group.add(tail);
+
+  const scale = 0.5 + Math.random() * 0.3;
+  group.scale.setScalar(scale);
+  group.traverse(c => { if (c.isMesh) { c.castShadow = true; } });
+
+  group.userData = {
+    speed: 0.01 + Math.random() * 0.015,
+    direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+    changeTimer: Math.random() * 3,
+    state: 'walking',
+    idleTimer: 0,
+    hopPhase: Math.random() * Math.PI * 2
+  };
+
+  return group;
+}
+
+const npcRabbits = [];
+for (let i = 0; i < 6; i++) {
+  const npc = createNPCRabbit();
+  const pos = randomFieldPos();
+  npc.position.copy(pos);
+  scene.add(npc);
+  npcRabbits.push(npc);
+}
+
+// --- Snake ---
+function createSnake() {
+  const group = new THREE.Group();
+  const snakeMat = new THREE.MeshLambertMaterial({ color: 0x4a7a2e });
+  const darkMat = new THREE.MeshLambertMaterial({ color: 0x2a4a1e });
+  const eyeMat = new THREE.MeshLambertMaterial({ color: 0xff4444 });
+
+  const segments = [];
+  const segCount = 8;
+  for (let i = 0; i < segCount; i++) {
+    const r = i === 0 ? 0.1 : Math.max(0.12 - i * 0.012, 0.04);
+    const seg = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 8, 6),
+      i % 2 === 0 ? snakeMat : darkMat
+    );
+    seg.position.set(0, 0.08, -i * 0.2);
+    seg.scale.y = 0.6;
+    group.add(seg);
+    segments.push(seg);
+  }
+
+  // Eyes
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), eyeMat);
+    eye.position.set(side * 0.06, 0.12, 0.08);
+    group.add(eye);
+  }
+
+  // Tongue
+  const tongue = new THREE.Mesh(
+    new THREE.ConeGeometry(0.01, 0.1, 4),
+    new THREE.MeshLambertMaterial({ color: 0xff0000 })
+  );
+  tongue.rotation.x = -Math.PI / 2;
+  tongue.position.set(0, 0.06, 0.15);
+  tongue.visible = false;
+  group.add(tongue);
+
+  group.traverse(c => { if (c.isMesh) { c.castShadow = true; } });
+
+  group.userData = {
+    segments,
+    tongue,
+    speed: 0.02,
+    direction: Math.random() * Math.PI * 2,
+    changeTimer: 2 + Math.random() * 4,
+    tongueTimer: 0,
+    phase: Math.random() * Math.PI * 2
+  };
+
+  return group;
+}
+
+const snakes = [];
+for (let i = 0; i < 2; i++) {
+  const snake = createSnake();
+  const pos = randomFieldPos();
+  snake.position.copy(pos);
+  scene.add(snake);
+  snakes.push(snake);
+}
+
 // --- Game State ---
 let carrotsHeld = 0;
 let totalScore = 0;
@@ -1452,6 +1695,24 @@ function drawMinimap() {
     const cp = worldToMinimap(c.position.x, c.position.z);
     ctx.beginPath();
     ctx.arc(cp.x, cp.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // NPC Rabbits (light brown)
+  ctx.fillStyle = '#c0a878';
+  for (const npc of npcRabbits) {
+    const np = worldToMinimap(npc.position.x, npc.position.z);
+    ctx.beginPath();
+    ctx.arc(np.x, np.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Snakes (dark green)
+  ctx.fillStyle = '#4a7a2e';
+  for (const s of snakes) {
+    const sp = worldToMinimap(s.position.x, s.position.z);
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -1660,6 +1921,93 @@ function animateCarrots(time) {
   }
 }
 
+// --- NPC Rabbit AI ---
+function updateNPCRabbits(dt) {
+  for (const npc of npcRabbits) {
+    const ud = npc.userData;
+
+    if (ud.state === 'idle') {
+      ud.idleTimer -= dt;
+      npc.position.y = THREE.MathUtils.lerp(npc.position.y, 0, 0.1);
+      if (ud.idleTimer <= 0) {
+        ud.state = 'walking';
+        ud.direction.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+        ud.changeTimer = 1 + Math.random() * 3;
+      }
+    } else {
+      ud.changeTimer -= dt;
+      if (ud.changeTimer <= 0) {
+        if (Math.random() < 0.3) {
+          ud.state = 'idle';
+          ud.idleTimer = 1 + Math.random() * 3;
+        } else {
+          ud.direction.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+          ud.changeTimer = 1 + Math.random() * 3;
+        }
+      }
+
+      npc.position.x += ud.direction.x * ud.speed;
+      npc.position.z += ud.direction.z * ud.speed;
+
+      const angle = Math.atan2(ud.direction.x, ud.direction.z);
+      npc.rotation.y = THREE.MathUtils.lerp(npc.rotation.y, angle, 0.1);
+
+      ud.hopPhase += dt * 8;
+      npc.position.y = Math.abs(Math.sin(ud.hopPhase)) * 0.1 * npc.scale.x;
+
+      const limit = FIELD_SIZE * 0.7;
+      if (Math.abs(npc.position.x) > limit || Math.abs(npc.position.z) > limit ||
+          isOnRoad(npc.position.x, npc.position.z)) {
+        ud.direction.negate();
+        npc.position.x += ud.direction.x * ud.speed * 3;
+        npc.position.z += ud.direction.z * ud.speed * 3;
+      }
+    }
+  }
+}
+
+// --- Snake AI ---
+function updateSnakes(dt) {
+  for (const snake of snakes) {
+    const ud = snake.userData;
+
+    ud.phase += dt * 3;
+    ud.changeTimer -= dt;
+
+    if (ud.changeTimer <= 0) {
+      ud.direction += (Math.random() - 0.5) * 1.5;
+      ud.changeTimer = 2 + Math.random() * 4;
+    }
+
+    snake.position.x += Math.sin(ud.direction) * ud.speed;
+    snake.position.z += Math.cos(ud.direction) * ud.speed;
+
+    const limit = FIELD_SIZE * 0.7;
+    if (Math.abs(snake.position.x) > limit || Math.abs(snake.position.z) > limit ||
+        isOnRoad(snake.position.x, snake.position.z)) {
+      ud.direction += Math.PI;
+      snake.position.x += Math.sin(ud.direction) * ud.speed * 3;
+      snake.position.z += Math.cos(ud.direction) * ud.speed * 3;
+    }
+
+    // Sinusoidal body wave
+    for (let i = 0; i < ud.segments.length; i++) {
+      const seg = ud.segments[i];
+      seg.position.x = Math.sin(ud.phase + i * 0.8) * 0.1;
+      seg.position.z = -i * 0.2;
+    }
+
+    snake.rotation.y = ud.direction;
+
+    // Tongue flicker
+    ud.tongueTimer -= dt;
+    if (ud.tongueTimer <= 0) {
+      ud.tongue.visible = !ud.tongue.visible;
+      ud.tongueTimer = ud.tongue.visible ? 0.15 : 1 + Math.random() * 3;
+    }
+  }
+}
+
 // --- Game Loop ---
 const clock = new THREE.Clock();
 
@@ -1716,6 +2064,10 @@ function update() {
   }
 
   animateFox(dt);
+
+  // --- NPC & Snake updates ---
+  updateNPCRabbits(dt);
+  updateSnakes(dt);
 
   // --- Fox warning sound ---
   SoundEngine.updateFoxWarning(dist);
