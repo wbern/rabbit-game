@@ -33,6 +33,14 @@ canvas { display: block; }
   text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
   pointer-events: none; z-index: 10;
 }
+#minimap {
+  position: fixed; bottom: 16px; right: 16px;
+  width: 160px; height: 160px;
+  border: 2px solid rgba(255,255,255,0.7);
+  border-radius: 8px;
+  background: rgba(30, 60, 30, 0.75);
+  pointer-events: none; z-index: 10;
+}
 </style>
 </head>
 <body>
@@ -44,6 +52,7 @@ canvas { display: block; }
 </div>
 <div id="message"></div>
 <div id="instructions">WASD to move · Collect carrots · Walk over burrow to deposit · Avoid the fox!</div>
+<canvas id="minimap" width="160" height="160"></canvas>
 
 <script type="importmap">
 {
@@ -410,6 +419,71 @@ function showMessage(text, duration = 2000) {
   messageTimeout = setTimeout(() => { messageEl.style.opacity = '0'; }, duration);
 }
 
+// --- Minimap ---
+const minimapCanvas = document.getElementById('minimap');
+const minimapCtx = minimapCanvas.getContext('2d');
+const MINIMAP_SIZE = 160;
+const MINIMAP_FIELD = FIELD_SIZE * 2; // full field extent
+
+function worldToMinimap(x, z) {
+  return {
+    x: ((x + FIELD_SIZE) / MINIMAP_FIELD) * MINIMAP_SIZE,
+    y: ((-z + FIELD_SIZE) / MINIMAP_FIELD) * MINIMAP_SIZE
+  };
+}
+
+function drawMinimap() {
+  const ctx = minimapCtx;
+  ctx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+
+  // Background
+  ctx.fillStyle = 'rgba(74, 140, 63, 0.9)';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE, 6);
+  ctx.fill();
+
+  // Burrow
+  if (burrow) {
+    const bp = worldToMinimap(burrow.position.x, burrow.position.z);
+    ctx.fillStyle = '#2a1a0a';
+    ctx.beginPath();
+    ctx.arc(bp.x, bp.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8b6914';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Carrots
+  ctx.fillStyle = '#ff8c00';
+  for (const c of carrots) {
+    const cp = worldToMinimap(c.position.x, c.position.z);
+    ctx.beginPath();
+    ctx.arc(cp.x, cp.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Fox (red)
+  const fp = worldToMinimap(fox.position.x, fox.position.z);
+  ctx.fillStyle = '#e83030';
+  ctx.beginPath();
+  ctx.arc(fp.x, fp.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Rabbit (green)
+  const rp = worldToMinimap(rabbit.position.x, rabbit.position.z);
+  ctx.fillStyle = '#40e040';
+  ctx.beginPath();
+  ctx.arc(rp.x, rp.y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
 // --- Camera ---
 const cameraOffset = new THREE.Vector3(0, 8, -10);
 
@@ -575,6 +649,7 @@ function update() {
 
   updateHUD();
   updateCamera();
+  drawMinimap();
 }
 
 function animate() {
