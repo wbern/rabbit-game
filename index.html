@@ -41,6 +41,19 @@ canvas { display: block; }
   background: rgba(30, 60, 30, 0.75);
   pointer-events: none; z-index: 10;
 }
+#volume-control {
+  position: fixed; top: 20px; right: 20px; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  color: #fff; font-size: 14px;
+  text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+}
+#volume-control input[type="range"] {
+  width: 100px; accent-color: #ffa500; cursor: pointer;
+}
+#mute-btn {
+  background: none; border: none; color: #fff; font-size: 20px;
+  cursor: pointer; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+}
 </style>
 </head>
 <body>
@@ -53,6 +66,10 @@ canvas { display: block; }
 <div id="message"></div>
 <div id="instructions">WASD för att röra dig · Samla morötter · Gå till grytan för att lämna · Undvik räven!</div>
 <canvas id="minimap" width="160" height="160"></canvas>
+<div id="volume-control">
+  <button id="mute-btn">🔊</button>
+  <input type="range" id="volume-slider" min="0" max="100" value="50">
+</div>
 
 <script type="importmap">
 {
@@ -63,6 +80,406 @@ canvas { display: block; }
 </script>
 <script type="module">
 import * as THREE from 'three';
+
+// --- Sound Engine (Web Audio API) ---
+const SoundEngine = (() => {
+  let ctx = null;
+  let masterGain = null;
+  let musicGain = null;
+  let sfxGain = null;
+  let muted = false;
+  let musicPlaying = false;
+  let musicNodes = [];
+
+  function init() {
+    if (ctx) return;
+    ctx = new AudioContext();
+    masterGain = ctx.createGain();
+    masterGain.gain.value = 0.5;
+    masterGain.connect(ctx.destination);
+
+    musicGain = ctx.createGain();
+    musicGain.gain.value = 0.3;
+    musicGain.connect(masterGain);
+
+    sfxGain = ctx.createGain();
+    sfxGain.gain.value = 0.6;
+    sfxGain.connect(masterGain);
+  }
+
+  function ensureContext() {
+    if (!ctx) init();
+    if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  function setVolume(v) {
+    ensureContext();
+    masterGain.gain.value = v;
+  }
+
+  function toggleMute() {
+    ensureContext();
+    muted = !muted;
+    masterGain.gain.setTargetAtTime(muted ? 0 : parseFloat(document.getElementById('volume-slider').value) / 100, ctx.currentTime, 0.02);
+    return muted;
+  }
+
+  // Utility: create noise buffer
+  function noiseBuffer(duration, sampleRate) {
+    const sr = sampleRate || ctx.sampleRate;
+    const len = sr * duration;
+    const buf = ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  // --- Sound Effects ---
+
+  function playCarrotPickup() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Pop tone - ascending
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(400, t);
+    osc.frequency.exponentialRampToValueAtTime(900, t + 0.08);
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.12);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.12);
+
+    // Crunch noise
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(0.06);
+    const nGain = ctx.createGain();
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'bandpass';
+    nFilter.frequency.value = 3000;
+    nFilter.Q.value = 2;
+    nGain.gain.setValueAtTime(0.15, t + 0.02);
+    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.08);
+    noise.connect(nFilter).connect(nGain).connect(sfxGain);
+    noise.start(t + 0.02);
+    noise.stop(t + 0.08);
+  }
+
+  function playDeposit() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Plonk - descending tone
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(600, t);
+    osc.frequency.exponentialRampToValueAtTime(200, t + 0.2);
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.25);
+
+    // Soft thud
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(120, t);
+    osc2.frequency.exponentialRampToValueAtTime(60, t + 0.15);
+    gain2.gain.setValueAtTime(0.2, t);
+    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc2.connect(gain2).connect(sfxGain);
+    osc2.start(t);
+    osc2.stop(t + 0.15);
+  }
+
+  let foxWarningOsc = null;
+  let foxWarningGain = null;
+  let foxWarningLfo = null;
+
+  function updateFoxWarning(distance) {
+    ensureContext();
+    // Start warning when fox is within 10 units, intensify as closer
+    const threshold = 10;
+    if (distance > threshold) {
+      if (foxWarningOsc) {
+        foxWarningGain.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
+      }
+      return;
+    }
+
+    const intensity = 1 - (distance / threshold); // 0 to 1
+
+    if (!foxWarningOsc) {
+      foxWarningOsc = ctx.createOscillator();
+      foxWarningGain = ctx.createGain();
+      foxWarningLfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+
+      foxWarningOsc.type = 'sine';
+      foxWarningOsc.frequency.value = 60;
+      foxWarningLfo.type = 'sine';
+      foxWarningLfo.frequency.value = 1.5;
+      lfoGain.gain.value = 30;
+
+      foxWarningLfo.connect(lfoGain).connect(foxWarningOsc.frequency);
+      foxWarningOsc.connect(foxWarningGain).connect(sfxGain);
+
+      foxWarningGain.gain.value = 0;
+      foxWarningOsc.start();
+      foxWarningLfo.start();
+    }
+
+    // Heartbeat rate increases with proximity
+    foxWarningLfo.frequency.setTargetAtTime(1.5 + intensity * 4, ctx.currentTime, 0.1);
+    foxWarningGain.gain.setTargetAtTime(intensity * 0.15, ctx.currentTime, 0.1);
+    foxWarningOsc.frequency.setTargetAtTime(50 + intensity * 30, ctx.currentTime, 0.1);
+  }
+
+  function playFoxCatch() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Dramatic descending tone
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(800, t);
+    osc.frequency.exponentialRampToValueAtTime(100, t + 0.4);
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.5);
+
+    // Impact noise
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(0.15);
+    const nGain = ctx.createGain();
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'lowpass';
+    nFilter.frequency.value = 1000;
+    nGain.gain.setValueAtTime(0.25, t);
+    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+    noise.connect(nFilter).connect(nGain).connect(sfxGain);
+    noise.start(t);
+    noise.stop(t + 0.3);
+
+    // Secondary alarm tone
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(300, t + 0.1);
+    osc2.frequency.setValueAtTime(200, t + 0.2);
+    osc2.frequency.setValueAtTime(150, t + 0.3);
+    gain2.gain.setValueAtTime(0.1, t + 0.1);
+    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.45);
+    osc2.connect(gain2).connect(sfxGain);
+    osc2.start(t + 0.1);
+    osc2.stop(t + 0.45);
+  }
+
+  function playBurrowFull() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Celebration fanfare - ascending arpeggio
+    const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const start = t + i * 0.12;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.2, start + 0.03);
+      gain.gain.setValueAtTime(0.2, start + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.01, start + 0.4);
+      osc.connect(gain).connect(sfxGain);
+      osc.start(start);
+      osc.stop(start + 0.4);
+    });
+
+    // Shimmer noise
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer(0.6);
+    const nGain = ctx.createGain();
+    const nFilter = ctx.createBiquadFilter();
+    nFilter.type = 'highpass';
+    nFilter.frequency.value = 6000;
+    nGain.gain.setValueAtTime(0.08, t);
+    nGain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+    noise.connect(nFilter).connect(nGain).connect(sfxGain);
+    noise.start(t);
+    noise.stop(t + 0.6);
+  }
+
+  function playNewHole() {
+    ensureContext();
+    const t = ctx.currentTime;
+
+    // Magical shimmer - ascending tones with vibrato
+    const freqs = [330, 440, 554, 660];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const vibrato = ctx.createOscillator();
+      const vGain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      vibrato.type = 'sine';
+      vibrato.frequency.value = 6;
+      vGain.gain.value = 8;
+
+      vibrato.connect(vGain).connect(osc.frequency);
+      const start = t + i * 0.15;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.01, start + 0.5);
+      osc.connect(gain).connect(sfxGain);
+      osc.start(start);
+      osc.stop(start + 0.5);
+      vibrato.start(start);
+      vibrato.stop(start + 0.5);
+    });
+  }
+
+  let lastHopTime = 0;
+  function playHop() {
+    ensureContext();
+    const t = ctx.currentTime;
+    if (t - lastHopTime < 0.15) return; // throttle
+    lastHopTime = t;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(280, t + 0.04);
+    osc.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+    gain.gain.setValueAtTime(0.08, t);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+    osc.connect(gain).connect(sfxGain);
+    osc.start(t);
+    osc.stop(t + 0.1);
+  }
+
+  // --- Background Music ---
+  // Simple pentatonic melody loop
+
+  function startMusic() {
+    if (musicPlaying) return;
+    ensureContext();
+    musicPlaying = true;
+
+    // Pentatonic scale notes (C major pentatonic across octaves)
+    const scale = [262, 294, 330, 392, 440, 524, 588, 660];
+    const beatDuration = 0.3;
+    const measureLen = 16;
+
+    // Generate a gentle melody pattern
+    const melody = [0, 2, 4, 5, 4, 2, 3, 1, 0, 3, 5, 7, 5, 4, 2, 0];
+
+    function playMeasure() {
+      if (!musicPlaying) return;
+      const t = ctx.currentTime;
+
+      melody.forEach((noteIdx, i) => {
+        const start = t + i * beatDuration;
+        const freq = scale[noteIdx];
+
+        // Melody voice
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.12, start + 0.05);
+        gain.gain.setValueAtTime(0.12, start + beatDuration * 0.6);
+        gain.gain.exponentialRampToValueAtTime(0.01, start + beatDuration * 0.95);
+        osc.connect(gain).connect(musicGain);
+        osc.start(start);
+        osc.stop(start + beatDuration);
+
+        // Soft harmony (fifth above, quieter)
+        if (i % 2 === 0) {
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.type = 'sine';
+          osc2.frequency.value = freq * 1.5;
+          gain2.gain.setValueAtTime(0, start);
+          gain2.gain.linearRampToValueAtTime(0.04, start + 0.05);
+          gain2.gain.exponentialRampToValueAtTime(0.01, start + beatDuration * 0.9);
+          osc2.connect(gain2).connect(musicGain);
+          osc2.start(start);
+          osc2.stop(start + beatDuration);
+        }
+
+        // Bass note (every 4 beats)
+        if (i % 4 === 0) {
+          const bass = ctx.createOscillator();
+          const bGain = ctx.createGain();
+          bass.type = 'triangle';
+          bass.frequency.value = freq / 2;
+          bGain.gain.setValueAtTime(0, start);
+          bGain.gain.linearRampToValueAtTime(0.08, start + 0.03);
+          bGain.gain.exponentialRampToValueAtTime(0.01, start + beatDuration * 3.8);
+          bass.connect(bGain).connect(musicGain);
+          bass.start(start);
+          bass.stop(start + beatDuration * 4);
+        }
+      });
+
+      // Schedule next measure
+      const measureDuration = measureLen * beatDuration;
+      musicNodes.push(setTimeout(playMeasure, measureDuration * 1000 - 50));
+    }
+
+    playMeasure();
+  }
+
+  function stopMusic() {
+    musicPlaying = false;
+    musicNodes.forEach(id => clearTimeout(id));
+    musicNodes = [];
+  }
+
+  return {
+    init, setVolume, toggleMute, startMusic, stopMusic,
+    playCarrotPickup, playDeposit, updateFoxWarning,
+    playFoxCatch, playBurrowFull, playNewHole, playHop
+  };
+})();
+
+// Volume control UI
+const volumeSlider = document.getElementById('volume-slider');
+const muteBtn = document.getElementById('mute-btn');
+
+volumeSlider.addEventListener('input', () => {
+  SoundEngine.init();
+  SoundEngine.setVolume(volumeSlider.value / 100);
+});
+
+muteBtn.addEventListener('click', () => {
+  SoundEngine.init();
+  const isMuted = SoundEngine.toggleMute();
+  muteBtn.textContent = isMuted ? '🔇' : '🔊';
+});
+
+// Start audio on first user interaction
+let audioStarted = false;
+function startAudio() {
+  if (audioStarted) return;
+  audioStarted = true;
+  SoundEngine.init();
+  SoundEngine.startMusic();
+}
+window.addEventListener('keydown', startAudio, { once: false });
+window.addEventListener('click', startAudio, { once: false });
 
 // --- Game Config ---
 const FIELD_SIZE = 40;
@@ -554,6 +971,7 @@ function update() {
   }
 
   animateRabbit(dt, moving);
+  if (moving) SoundEngine.playHop();
 
   // --- Fox AI ---
   foxSpeedBonus += FOX_ACCEL * dt;
@@ -574,10 +992,14 @@ function update() {
 
   animateFox(dt);
 
+  // --- Fox warning sound ---
+  SoundEngine.updateFoxWarning(dist);
+
   // --- Fox catches rabbit ---
   const now = performance.now();
   if (dist < CATCH_DISTANCE && now - lastCatchTime > CATCH_COOLDOWN) {
     lastCatchTime = now;
+    SoundEngine.playFoxCatch();
     if (carrotsHeld > 0) {
       const lost = Math.min(carrotsHeld, CARROT_LOSS_ON_CATCH);
       carrotsHeld -= lost;
@@ -609,6 +1031,7 @@ function update() {
       scene.remove(c);
       carrots.splice(i, 1);
       carrotsHeld++;
+      SoundEngine.playCarrotPickup();
       // Spawn replacement carrot elsewhere
       const newCarrot = createCarrot();
       newCarrot.position.copy(randomFieldPos());
@@ -627,11 +1050,13 @@ function update() {
         burrowFill += deposit;
         totalScore += deposit * 10;
         updateBurrowVisuals();
+        SoundEngine.playDeposit();
         showMessage(`+${deposit * 10} poäng! Lämnade ${deposit} ${deposit > 1 ? 'morötter' : 'morot'}`);
 
         if (burrowFill >= BURROW_CAPACITY) {
+          SoundEngine.playBurrowFull();
           showMessage('🕳️ Grytan är full! En ny har dykt upp!', 3000);
-          setTimeout(() => spawnBurrow(), 1500);
+          setTimeout(() => { SoundEngine.playNewHole(); spawnBurrow(); }, 1500);
         }
       }
     }
